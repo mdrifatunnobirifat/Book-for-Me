@@ -27,7 +27,7 @@ export default function Home() {
             Set your schedule, manage services, and accept bookings from customers.
           </p>
           <Link
-            href="/signup"
+            href="auth/signup"
             className="inline-block bg-purple-600 hover:bg-purple-500 text-white font-semibold px-6 py-2 rounded-xl transition-all duration-200"
           >
             Get Started Free
@@ -42,7 +42,7 @@ export default function Home() {
             Browse providers, pick your time slot, and book appointments instantly.
           </p>
           <Link
-            href="/signup"
+            href="auth/signup/"
             className="inline-block bg-white/20 hover:bg-white/30 text-white font-semibold px-6 py-2 rounded-xl transition-all duration-200"
           >
             Find a Provider
@@ -51,13 +51,22 @@ export default function Home() {
 
       </div>
 
-      {/* Sign In Link */}
-      <p className="text-white/50 text-sm">
-        Already have an account?{' '}
-        <Link href="/auth/login" className="text-lg text-purple-100 hover:text-purple-200 font-serif font-bold transition">
-          Sign in here
-        </Link>
-      </p>
+      {/* Explore + Sign In */}
+<div className="flex flex-col items-center gap-3">
+  <Link
+    href="/explore"
+    className="bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold px-8 py-3 rounded-xl transition-all duration-200"
+  >
+    🔍 Browse All Providers
+  </Link>
+  <p className="text-white/50 text-sm">
+    Already have an account?{' '}
+    <Link href="/auth/login" className="text-purple-300 hover:text-purple-200 font-medium transition">
+      Sign in here
+    </Link>
+  </p>
+</div>
+
 
     </div>
   )

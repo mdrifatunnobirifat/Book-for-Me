@@ -58,7 +58,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo / Title */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">📅 BookIt</h1>
+          <Link href="/" className="text-4xl font-bold text-white mb-2">📅 BookIt</Link>
           <p className="text-purple-300">Welcome back! Sign in to continue.</p>
         </div>
 
