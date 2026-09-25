@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import ServiceForm from '../../components/provider/ServiceForm'
 import ScheduleForm from '../../components/provider/ScheduleForm'
+import BookingsTable from '../../components/provider/BookingsTable'
 
 interface Profile {
   id: string
@@ -30,6 +31,17 @@ interface WorkingHour {
   is_day_off: boolean
 }
 
+interface Booking {
+  id: string
+  booking_date: string
+  start_time: string
+  end_time: string
+  status: string
+  customer_notes: string | null
+  services: { title: string; duration_minutes: number; price: number }
+  customer: { id: string; full_name: string; email?: string }
+}
+
 export default function ProviderDashboard() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [services, setServices] = useState<Service[]>([])
@@ -38,15 +50,28 @@ export default function ProviderDashboard() {
   const [showToast, setShowToast] = useState(true)
   const router = useRouter()
   const supabase = createClient()
+  const [bookings, setBookings] = useState<Booking[]>([])
+
 
   const fetchData = async (userId: string) => {
-    const [{ data: svc }, { data: wh }] = await Promise.all([
-      supabase.from('services').select('*').eq('provider_id', userId),
-      supabase.from('working_hours').select('*').eq('provider_id', userId),
-    ])
-    setServices(svc || [])
-    setWorkingHours(wh || [])
-  }
+  const [{ data: svc }, { data: wh }, { data: bk }] = await Promise.all([
+    supabase.from('services').select('*').eq('provider_id', userId),
+    supabase.from('working_hours').select('*').eq('provider_id', userId),
+    supabase
+      .from('bookings')
+      .select(`
+        id, booking_date, start_time, end_time, status, customer_notes,
+        services (title, duration_minutes, price),
+        customer:profiles!bookings_customer_id_fkey (id, full_name)
+      `)
+      .eq('provider_id', userId)
+      .order('booking_date', { ascending: false }),
+  ])
+  setServices(svc || [])
+  setWorkingHours(wh || [])
+  setBookings((bk as unknown as Booking[]) || [])
+}
+
 
   useEffect(() => {
     const init = async () => {
@@ -148,17 +173,44 @@ export default function ProviderDashboard() {
             />
           )}
         </div>
+        {/* Bookings Table — below services and schedule */}
+{profile && (
+  <div className="mt-6">
+    <BookingsTable
+      bookings={bookings}
+      providerName={profile.business_name || profile.full_name}
+      onRefresh={() => fetchData(profile.id)}
+    />
+  </div>
+)}
+
 
         {/* Booking Link */}
-        <div className="mt-6 bg-purple-500/20 border border-purple-500/40 rounded-2xl p-5">
-          <p className="text-purple-200 font-semibold mb-1">🔗 Your Public Booking Link</p>
-          <p className="text-white/50 text-sm">
-            Customers can book you at:{' '}
-            <span className="text-purple-300 font-mono">
-              /book/{profile?.slug || 'your-slug-coming-soon'}
-            </span>
-          </p>
-        </div>
+<div className="mt-6 bg-purple-500/20 border border-purple-500/40 rounded-2xl p-5">
+  <p className="text-purple-200 font-semibold mb-3">🔗 Your Public Booking Link</p>
+  <div className="flex flex-col sm:flex-row gap-3">
+    <input
+      type="text"
+      readOnly
+      value={`${typeof window !== 'undefined' ? window.location.origin : ''}/book/${profile?.id}`}
+      className="flex-1 bg-white/10 border border-white/20 text-white/70 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none"
+    />
+    <button
+      onClick={() => {
+        const link = `${window.location.origin}/book/${profile?.id}`
+        navigator.clipboard.writeText(link)
+        alert('Link copied!')
+      }}
+      className="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-xl transition text-sm font-semibold"
+    >
+      Copy Link
+    </button>
+  </div>
+  <p className="text-white/40 text-xs mt-2">
+    Share this link so customers can book your services
+  </p>
+</div>
+
 
       </div>
     </div>

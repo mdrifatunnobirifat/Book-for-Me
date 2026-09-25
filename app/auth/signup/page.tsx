@@ -1,20 +1,30 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
 export default function SignupPage() {
+  const searchParams = useSearchParams()
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  // ✅ Read role from URL: /auth/signup?role=provider
   const [role, setRole] = useState<'customer' | 'provider'>('customer')
   const [businessName, setBusinessName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+
+  // ✅ Set role from URL on page load
+  useEffect(() => {
+    const roleParam = searchParams.get('role')
+    if (roleParam === 'provider' || roleParam === 'customer') {
+      setRole(roleParam)
+    }
+  }, [searchParams])
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,23 +59,25 @@ export default function SignupPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo / Title */}
+
+        {/* Logo */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">📅 BookIt</h1>
-          <p className="text-purple-300">Create your free account today.</p>
+          <Link href="/" className="text-4xl font-bold text-white mb-2 hover:opacity-80 transition">
+            📅 BookIt
+          </Link>
+          <p className="text-purple-300 mt-2">Create your free account today.</p>
         </div>
 
-        {/* Card */}
         <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 shadow-2xl">
           <h2 className="text-2xl font-bold text-white mb-6">Create Account</h2>
 
           {error && (
             <div className="bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg mb-4 text-sm">
-              {error}
+              ❌ {error}
             </div>
           )}
 
-          {/* Role Selector */}
+          {/* ✅ Role Selector — pre-selected based on URL */}
           <div className="grid grid-cols-2 gap-3 mb-6">
             <button
               type="button"
@@ -104,6 +116,7 @@ export default function SignupPage() {
               />
             </div>
 
+            {/* Business Name — only shows for providers */}
             {role === 'provider' && (
               <div>
                 <label className="block text-purple-200 text-sm font-medium mb-2">Business Name</label>
@@ -148,7 +161,7 @@ export default function SignupPage() {
               disabled={loading}
               className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30 mt-2"
             >
-              {loading ? 'Creating account...' : 'Create Account →'}
+              {loading ? 'Creating account...' : `Create ${role === 'provider' ? 'Provider' : 'Customer'} Account →`}
             </button>
           </form>
 
