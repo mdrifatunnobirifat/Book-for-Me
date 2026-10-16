@@ -55,7 +55,7 @@ export default function ScheduleForm({ providerId, workingHours, onRefresh }: Pr
   }
 
   return (
-    <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-6">
+    <div className="bg-gray-800 backdrop-blur-md border-8 border-black rounded-2xl p-6">
       <h2 className="text-xl font-bold text-white mb-5">🗓️ Weekly Schedule</h2>
       <div className="space-y-3">
         {DAYS.map((day, index) => {
@@ -112,7 +112,7 @@ function DayRow({
         }}
         className={`text-xs px-3 py-1 rounded-lg border transition ${
           off
-            ? 'bg-red-500/20 border-red-500/40 text-red-300'
+            ? 'bg-red-300 border-red-500/40 text-red-950'
             : 'bg-green-500/20 border-green-500/40 text-green-300'
         }`}
       >
@@ -138,7 +138,7 @@ function DayRow({
           <button
             onClick={() => onSave(dayIndex, start, end, off)}
             disabled={saving}
-            className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs px-4 py-1.5 rounded-lg transition"
+            className="bg-blue-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs px-4 py-1.5 rounded-lg transition"
           >
             {saving ? 'Saving...' : 'Save'}
           </button>

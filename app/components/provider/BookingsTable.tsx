@@ -157,12 +157,12 @@ export default function BookingsTable({ bookings, providerName, onRefresh }: Pro
   }
 
   return (
-    <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-5">
+    <div className="bg-blue-500 backdrop-blur-md border border-white/20 rounded-2xl p-5">
 
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-xl font-bold text-white">📋 Booking Requests</h2>
-        <span className="text-white/40 text-sm">{bookings.length} total</span>
+        <span className="text-black text-sm border-2 border-emerald-300 p-2 rounded-4xl">{bookings.length} total</span>
       </div>
 
       {/* Status Filter Tabs */}
@@ -171,10 +171,10 @@ export default function BookingsTable({ bookings, providerName, onRefresh }: Pro
           <button
             key={s}
             onClick={() => setFilter(s)}
-            className={`text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
+            className={`text-xs px-3 py-1.5 rounded-full border transition-all font-bold ${
               filter === s
-                ? 'bg-purple-600 border-purple-400 text-white'
-                : 'bg-white/5 border-white/20 text-white/60 hover:border-white/40'
+                ? 'bg-cyan-800 border-cyan-900 text-white'
+                : 'bg-blue-200 border-white/200 text-black hover: hover:bg-blue-400'
             }`}
           >
             {s === 'all' ? '📋 All' :

@@ -70,7 +70,7 @@ export default function ServiceForm({ providerId, services, onRefresh }: Props) 
         <h2 className="text-xl font-bold text-white">🛠️ My Services</h2>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="bg-purple-600 hover:bg-purple-500 text-white text-sm px-4 py-2 rounded-xl transition"
+          className="bg-blue-700 hover:bg-amber-500 text-white text-sm px-4 py-2 rounded-xl transition"
         >
           {showForm ? '✕ Cancel' : '+ Add Service'}
         </button>
@@ -87,15 +87,15 @@ export default function ServiceForm({ providerId, services, onRefresh }: Props) 
             onChange={(e) => setTitle(e.target.value)}
             required
             placeholder="Service name (e.g. Haircut)"
-            className="w-full bg-white/10 border border-white/20 text-white placeholder-white/40 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
+            className="w-full bg-white border border-cyan-900 text-black placeholder-amber-700 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
           />
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Duration (minutes)</label>
+              <label className="text-black text-xs mb-1 block">Duration (minutes)</label>
               <select
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
-                className="w-full bg-white/10 border border-white/20 text-white rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                className="w-full bg-white border border-cyan-900 text-amber-700 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
               >
                 {[15, 30, 45, 60, 90, 120].map(d => (
                   <option key={d} value={d} className="bg-slate-800">{d} mins</option>
@@ -103,7 +103,7 @@ export default function ServiceForm({ providerId, services, onRefresh }: Props) 
               </select>
             </div>
             <div>
-              <label className="text-white/60 text-xs mb-1 block">Price ($)</label>
+              <label className="text-black text-xs mb-1 block">Price ($)</label>
               <input
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
@@ -111,7 +111,7 @@ export default function ServiceForm({ providerId, services, onRefresh }: Props) 
                 min="0"
                 step="0.01"
                 placeholder="0.00"
-                className="w-full bg-white/10 border border-white/20 text-white placeholder-white/40 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                className="w-full  bg-white border border-cyan-900 text-amber-700 placeholder-white/40 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
               />
             </div>
           </div>
@@ -120,12 +120,12 @@ export default function ServiceForm({ providerId, services, onRefresh }: Props) 
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Short description (optional)"
             rows={2}
-            className="w-full bg-white/10 border border-white/20 text-white placeholder-white/40 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none"
+            className="w-full  bg-white border border-cyan-900 text-black placeholder-amber-700 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none"
           />
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl transition"
+            className="w-full bg-linear-to-r from-blue-500 to-cyan-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl transition"
           >
             {loading ? 'Adding...' : 'Add Service'}
           </button>

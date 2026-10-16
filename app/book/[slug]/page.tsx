@@ -5,113 +5,43 @@ import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 
-// ─── Types ──────────────────────────────────────────────
-interface Provider {
-  id: string
-  full_name: string
-  business_name: string | null
-  bio: string | null
-  slug: string | null
-}
+interface Provider { id: string; full_name: string; business_name: string | null; bio: string | null }
+interface Service { id: string; title: string; duration_minutes: number; price: number; description: string | null }
+interface WorkingHour { day_of_week: number; start_time: string; end_time: string; is_day_off: boolean }
+interface Booking { booking_date: string; start_time: string; end_time: string; status: string }
 
-interface Service {
-  id: string
-  title: string
-  duration_minutes: number
-  price: number
-  description: string | null
-}
+function timeToMins(t: string) { const [h, m] = t.slice(0, 5).split(':').map(Number); return h * 60 + m }
+function minsToTime(m: number) { return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` }
+function formatDate(d: string) { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) }
+function formatTime(t: string) { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
+function today() { return new Date().toISOString().split('T')[0] }
 
-interface WorkingHour {
-  day_of_week: number
-  start_time: string
-  end_time: string
-  is_day_off: boolean
-}
-
-interface Booking {
-  booking_date: string
-  start_time: string
-  end_time: string
-  status: string
-}
-
-// ─── Helper: Generate time slots based on provider hours + service duration ──
-function timeToMinutes(time: string): number {
-  const [h, m] = time.slice(0, 5).split(':').map(Number)
-  return h * 60 + m
-}
-
-function generateSlots(
-  startTime: string,
-  endTime: string,
-  durationMinutes: number,
-  existingBookings: Booking[],
-  selectedDate: string
-): string[] {
+function generateSlots(start: string, end: string, dur: number, bookings: Booking[], date: string): string[] {
   const slots: string[] = []
-  let current = timeToMinutes(startTime)
-  const end = timeToMinutes(endTime)
-
-  while (current + durationMinutes <= end) {
-    const slotStartMins = current
-    const slotEndMins = current + durationMinutes
-
-    const slotStartStr = `${String(Math.floor(slotStartMins / 60)).padStart(2, '0')}:${String(slotStartMins % 60).padStart(2, '0')}`
-
-    // ✅ FIX 2: Robust overlap check
-    // A slot is blocked if ANY existing booking overlaps with it
-    const isBlocked = existingBookings.some((b) => {
-      if (b.booking_date !== selectedDate) return false
-      const bStartMins = timeToMinutes(b.start_time)
-      const bEndMins   = timeToMinutes(b.end_time)
-
-      // Overlap condition: slot starts before booking ends AND slot ends after booking starts
-      return slotStartMins < bEndMins && slotEndMins > bStartMins
-    })
-
-    if (!isBlocked) {
-      slots.push(slotStartStr)
-    }
-
-    current += durationMinutes
+  let cur = timeToMins(start)
+  const endM = timeToMins(end)
+  while (cur + dur <= endM) {
+    const s = minsToTime(cur), e = minsToTime(cur + dur)
+    const blocked = bookings.some(b =>
+      b.booking_date === date && b.status !== 'cancelled' &&
+      timeToMins(b.start_time) < timeToMins(e) && timeToMins(b.end_time) > timeToMins(s)
+    )
+    if (!blocked) slots.push(s)
+    cur += dur
   }
-
   return slots
 }
 
-
-// ─── Helper: Format date display ────────────────────────
-function formatDate(dateStr: string) {
-  const date = new Date(dateStr + 'T00:00:00')
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-  })
-}
-
-function formatTime(time: string) {
-  const [h, m] = time.split(':').map(Number)
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const hour = h % 12 || 12
-  return `${hour}:${String(m).padStart(2, '0')} ${ampm}`
-}
-
-function getTodayString() {
-  return new Date().toISOString().split('T')[0]
-}
-
-// ─── Main Component ──────────────────────────────────────
 export default function BookingPage() {
-  const params = useParams()
+  const { slug } = useParams() as { slug: string }
   const router = useRouter()
-  const slug = params.slug as string
   const supabase = createClient()
 
   const [provider, setProvider] = useState<Provider | null>(null)
   const [services, setServices] = useState<Service[]>([])
   const [workingHours, setWorkingHours] = useState<WorkingHour[]>([])
   const [blockedDates, setBlockedDates] = useState<string[]>([])
-  const [existingBookings, setExistingBookings] = useState<Booking[]>([])
+  const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
 
   const [selectedService, setSelectedService] = useState<Service | null>(null)
   const [selectedDate, setSelectedDate] = useState('')
@@ -119,475 +49,308 @@ export default function BookingPage() {
   const [availableSlots, setAvailableSlots] = useState<string[]>([])
   const [notes, setNotes] = useState('')
 
-  const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [slotsLoading, setSlotsLoading] = useState(false)
   const [booking, setBooking] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
   const [dateError, setDateError] = useState('')
+  const [step, setStep] = useState(1)
 
-  // ── Fetch Provider Data ──────────────────────────────
   useEffect(() => {
     const init = async () => {
-      // Get logged in user
       const { data: { user } } = await supabase.auth.getUser()
       setCurrentUser(user ? { id: user.id } : null)
-
-      // Find provider by slug OR by id
-      const { data: providerData } = await supabase
-        .from('profiles')
-        .select('id, full_name, business_name, bio, slug')
-        .or(`slug.eq.${slug},id.eq.${slug}`)
-        .eq('role', 'provider')
-        .single()
-
-      if (!providerData) { setLoading(false); return }
-      setProvider(providerData)
-
-      // Fetch services, working hours, blocked dates, bookings in parallel
-      const [svcRes, whRes, bdRes, bkRes] = await Promise.all([
-        supabase.from('services').select('*').eq('provider_id', providerData.id).eq('is_active', true),
-        supabase.from('working_hours').select('*').eq('provider_id', providerData.id),
-        supabase.from('blocked_dates').select('blocked_date').eq('provider_id', providerData.id),
-        supabase.from('bookings').select('booking_date, start_time, end_time, status').eq('provider_id', providerData.id),
+      const { data: prov } = await supabase.from('profiles')
+        .select('id, full_name, business_name, bio').or(`slug.eq.${slug},id.eq.${slug}`).eq('role', 'provider').single()
+      if (!prov) { setLoading(false); return }
+      setProvider(prov)
+      const [{ data: svc }, { data: wh }, { data: bd }] = await Promise.all([
+        supabase.from('services').select('*').eq('provider_id', prov.id).eq('is_active', true),
+        supabase.from('working_hours').select('*').eq('provider_id', prov.id),
+        supabase.from('blocked_dates').select('blocked_date').eq('provider_id', prov.id),
       ])
-
-      setServices(svcRes.data || [])
-      setWorkingHours(whRes.data || [])
-      setBlockedDates((bdRes.data || []).map((b: { blocked_date: string }) => b.blocked_date))
-      setExistingBookings(bkRes.data || [])
+      setServices(svc || [])
+      setWorkingHours(wh || [])
+      setBlockedDates((bd || []).map((b: { blocked_date: string }) => b.blocked_date))
       setLoading(false)
     }
-
     init()
   }, [slug])
 
-  // ── Generate Slots When Date + Service Selected ──────
-useEffect(() => {
-  if (!selectedDate || !selectedService || !provider) {
-    setAvailableSlots([])
-    setSelectedSlot('')
-    return
-  }
-
-  const checkAndGenerate = async () => {
-    setSlotsLoading(true)
-    setSelectedSlot('')
-    setDateError('')
-
-    // ✅ FIX 1: Always fetch FRESH bookings from DB before generating slots
-    // This prevents showing already-booked slots to new customers
-    const { data: freshBookings } = await supabase
-      .from('bookings')
-      .select('booking_date, start_time, end_time, status')
-      .eq('provider_id', provider.id)
-      .eq('booking_date', selectedDate)
-      .neq('status', 'cancelled') // ignore cancelled bookings
-
-    const activeBookings = freshBookings || []
-
-    const dayOfWeek = new Date(selectedDate + 'T00:00:00').getDay()
-
-    // Check if blocked date
-    if (blockedDates.includes(selectedDate)) {
-      setDateError('This date is blocked by the provider.')
-      setAvailableSlots([])
+  useEffect(() => {
+    if (!selectedDate || !selectedService || !provider) { setAvailableSlots([]); setSelectedSlot(''); return }
+    const check = async () => {
+      setSlotsLoading(true); setSelectedSlot(''); setDateError('')
+      const { data: fresh } = await supabase.from('bookings').select('booking_date,start_time,end_time,status')
+        .eq('provider_id', provider.id).eq('booking_date', selectedDate).neq('status', 'cancelled')
+      const dayOfWeek = new Date(selectedDate + 'T00:00:00').getDay()
+      if (blockedDates.includes(selectedDate)) { setDateError('This date is blocked by the provider.'); setAvailableSlots([]); setSlotsLoading(false); return }
+      const sched = workingHours.find(wh => wh.day_of_week === dayOfWeek)
+      if (!sched || sched.is_day_off) { setDateError('Provider is not available on this day.'); setAvailableSlots([]); setSlotsLoading(false); return }
+      setAvailableSlots(generateSlots(sched.start_time.slice(0, 5), sched.end_time.slice(0, 5), selectedService.duration_minutes, fresh || [], selectedDate))
       setSlotsLoading(false)
-      return
     }
+    check()
+  }, [selectedDate, selectedService])
 
-    // Check working hours for this day
-    const daySchedule = workingHours.find((wh) => wh.day_of_week === dayOfWeek)
-
-    if (!daySchedule || daySchedule.is_day_off) {
-      setDateError('Provider is not available on this day.')
-      setAvailableSlots([])
-      setSlotsLoading(false)
-      return
-    }
-
-    // Generate slots using FRESH bookings
-    const slots = generateSlots(
-      daySchedule.start_time.slice(0, 5),
-      daySchedule.end_time.slice(0, 5),
-      selectedService.duration_minutes,
-      activeBookings,
-      selectedDate
-    )
-
-    setAvailableSlots(slots)
-    setSlotsLoading(false)
-  }
-
-  checkAndGenerate()
-}, [selectedDate, selectedService, provider])
-
-
-  // ── Handle Booking Submission ────────────────────────
   const handleBook = async () => {
-    if (!currentUser) {
-      router.push(`/auth/login?redirect=/book/${slug}`)
-      return
-    }
-
+    if (!currentUser) { router.push('/auth/login'); return }
     if (!selectedService || !selectedDate || !selectedSlot || !provider) return
-
-    setBooking(true)
-    setError('')
-
-    const [h, m] = selectedSlot.split(':').map(Number)
-    const endMinutes = h * 60 + m + selectedService.duration_minutes
-    const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`
-     // ✅ FIX 4: Re-check slot availability one more time before inserting
-  const { data: lastCheck } = await supabase
-    .from('bookings')
-    .select('id')
-    .eq('provider_id', provider.id)
-    .eq('booking_date', selectedDate)
-    .neq('status', 'cancelled')
-    .lt('start_time', endTime)
-    .gt('end_time', selectedSlot)
-  if (lastCheck && lastCheck.length > 0) {
-    setError('Sorry! This slot was just booked by someone else. Please choose another time.')
-    setSelectedSlot('')
-    setBooking(false)
-    // Refresh slots to show updated availability
-    const dayOfWeek = new Date(selectedDate + 'T00:00:00').getDay()
-    const daySchedule = workingHours.find(wh => wh.day_of_week === dayOfWeek)
-    if (daySchedule) {
-      const { data: freshBookings } = await supabase
-        .from('bookings')
-        .select('booking_date, start_time, end_time, status')
-        .eq('provider_id', provider.id)
-        .eq('booking_date', selectedDate)
-        .neq('status', 'cancelled')
-      const slots = generateSlots(
-        daySchedule.start_time.slice(0, 5),
-        daySchedule.end_time.slice(0, 5),
-        selectedService.duration_minutes,
-        freshBookings || [],
-        selectedDate
-      )
-      setAvailableSlots(slots)
-    }
-    return
-  }
-
-    const { error: bookingError } = await supabase.from('bookings').insert({
-      provider_id: provider.id,
-      customer_id: currentUser.id,
-      service_id: selectedService.id,
-      booking_date: selectedDate,
-      start_time: selectedSlot,
-      end_time: endTime,
-      status: 'confirmed',
-      customer_notes: notes || null,
+    setBooking(true); setError('')
+    const endTime = minsToTime(timeToMins(selectedSlot) + selectedService.duration_minutes)
+    const { data: clash } = await supabase.from('bookings').select('id').eq('provider_id', provider.id)
+      .eq('booking_date', selectedDate).neq('status', 'cancelled').lt('start_time', endTime).gt('end_time', selectedSlot)
+    if (clash && clash.length > 0) { setError('Slot just taken. Choose another.'); setSelectedSlot(''); setBooking(false); return }
+    const { error: err } = await supabase.from('bookings').insert({
+      provider_id: provider.id, customer_id: currentUser.id, service_id: selectedService.id,
+      booking_date: selectedDate, start_time: selectedSlot, end_time: endTime,
+      status: 'pending', customer_notes: notes || null,
     })
-
-    if (bookingError) {
-      setError(bookingError.message)
-      setBooking(false)
-    } else {
-      setSuccess(true)
-    }
+    if (err) { setError(err.message); setBooking(false) } else { setSuccess(true) }
   }
 
-  // ─── Loading State ───────────────────────────────────
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-white text-xl animate-pulse">Loading booking page...</div>
+  if (loading) return (
+    <div className="sky-bg min-h-screen flex items-center justify-center">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-12 h-12 border-4 border-sky-400 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-sky-600 font-medium">Loading...</p>
       </div>
-    )
-  }
+    </div>
+  )
 
-  // ─── Provider Not Found ──────────────────────────────
-  if (!provider) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-6xl mb-4">🔍</p>
-          <h1 className="text-2xl font-bold text-white mb-2">Provider Not Found</h1>
-          <p className="text-white/50 mb-6">This booking link doesn&apos;t exist.</p>
-          <Link href="/explore" className="bg-purple-600 hover:bg-purple-500 text-white px-6 py-3 rounded-xl transition">
-            Browse Providers
-          </Link>
+  if (!provider) return (
+    <div className="sky-bg min-h-screen flex items-center justify-center">
+      <div className="glass rounded-2xl p-10 text-center animate-bounce-in">
+        <p className="text-6xl mb-4">🔍</p>
+        <h1 className="text-2xl font-bold text-slate-800 mb-2">Provider Not Found</h1>
+        <Link href="/explore" className="btn-shimmer inline-block mt-4 px-6 py-3 text-sm">Browse Providers</Link>
+      </div>
+    </div>
+  )
+
+  if (success) return (
+    <div className="sky-bg min-h-screen flex items-center justify-center p-4">
+      <div className="glass rounded-2xl p-10 max-w-md w-full text-center animate-bounce-in">
+        <div className="w-20 h-20 bg-gradient-to-br from-sky-400 to-blue-500 rounded-full flex items-center justify-center text-4xl mx-auto mb-5 animate-float">
+          🎉
+        </div>
+        <h1 className="text-3xl font-black text-slate-800 mb-2">Booking Sent!</h1>
+        <p className="text-slate-500 text-sm mb-6">Your request has been sent. You'll be notified once confirmed.</p>
+        <div className="bg-sky-50 rounded-xl p-4 my-4 text-left space-y-3 border border-sky-100">
+          {[
+            ['Provider', provider.business_name || provider.full_name],
+            ['Service', selectedService?.title],
+            ['Date', formatDate(selectedDate)],
+            ['Time', formatTime(selectedSlot)],
+          ].map(([k, v]) => (
+            <div key={k} className="flex justify-between">
+              <span className="text-slate-400 text-sm">{k}</span>
+              <span className="text-slate-800 text-sm font-semibold">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-3 mt-5">
+          <Link href="/dashboard/customer" className="flex-1 btn-shimmer text-center py-3 text-sm block">My Bookings</Link>
+          <Link href="/explore" className="flex-1 bg-white hover:bg-sky-50 text-sky-600 font-semibold border-2 border-sky-200 py-3 text-sm rounded-xl transition text-center">Browse More</Link>
         </div>
       </div>
-    )
-  }
+    </div>
+  )
 
-  // ─── Booking Success Screen ──────────────────────────
-  if (success) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
-        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 max-w-md w-full text-center">
-          <div className="text-6xl mb-4">🎉</div>
-          <h1 className="text-2xl font-bold text-white mb-2">Booking Confirmed!</h1>
-          <div className="bg-white/5 rounded-xl p-4 my-5 text-left space-y-2">
-            <p className="text-white/60 text-sm">Provider</p>
-            <p className="text-white font-medium">{provider.business_name || provider.full_name}</p>
-            <p className="text-white/60 text-sm mt-3">Service</p>
-            <p className="text-white font-medium">{selectedService?.title}</p>
-            <p className="text-white/60 text-sm mt-3">Date & Time</p>
-            <p className="text-white font-medium">{formatDate(selectedDate)}</p>
-            <p className="text-purple-300 font-medium">{formatTime(selectedSlot)}</p>
-          </div>
-          <div className="flex gap-3 mt-4">
-            <Link
-              href="/dashboard/customer"
-              className="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-semibold py-3 rounded-xl transition text-sm"
-            >
-              My Appointments
-            </Link>
-            <Link
-              href="/explore"
-              className="flex-1 bg-white/10 hover:bg-white/20 text-white font-semibold py-3 rounded-xl transition text-sm"
-            >
-              Browse More
-            </Link>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const steps = ['Select Service','Pick a Date','Choose Time','Confirm']
 
-  // ─── Main Booking UI ─────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-
-      {/* Navbar */}
-      <div className="border-b border-white/10 px-6 py-4">
+    <div className="sky-bg min-h-screen">
+      <nav className="bg-white/80 backdrop-blur-md border-b border-sky-100 px-6 py-4">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <Link href="/" className="text-xl font-bold text-white">📅 BookIt</Link>
-          {!currentUser && (
-            <Link href="/auth/login" className="text-sm text-purple-300 hover:text-purple-200 transition">
-              Sign in to book
-            </Link>
-          )}
+          <Link href="/" className="flex items-center gap-2">
+            <span className="text-2xl">📅</span>
+            <span className="text-xl font-black text-sky-700">BookIt</span>
+          </Link>
+          {!currentUser && <Link href="/auth/login" className="text-sm text-sky-500 hover:text-sky-700 font-semibold transition">Sign in to book</Link>}
         </div>
-      </div>
+      </nav>
 
       <div className="max-w-3xl mx-auto p-6">
-
-        {/* Provider Header */}
-        <div className="flex items-center gap-4 mb-8">
-          <div className="w-16 h-16 rounded-full bg-purple-600 flex items-center justify-center text-white font-bold text-2xl flex-shrink-0">
+        {/* Provider Card */}
+        <div className="glass rounded-2xl p-5 mb-6 flex items-center gap-4 animate-fade-up">
+          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center text-white font-black text-2xl flex-shrink-0 animate-float">
             {provider.full_name.charAt(0).toUpperCase()}
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">
-              {provider.business_name || provider.full_name}
-            </h1>
-            <p className="text-purple-300 text-sm">{provider.full_name}</p>
-            {provider.bio && <p className="text-white/50 text-sm mt-1">{provider.bio}</p>}
+            <h1 className="text-xl font-bold text-slate-800">{provider.business_name || provider.full_name}</h1>
+            <p className="text-sky-500 text-sm">{provider.full_name}</p>
+            {provider.bio && <p className="text-slate-400 text-sm mt-0.5">{provider.bio}</p>}
           </div>
         </div>
 
-        {/* Steps */}
-        <div className="space-y-6">
+        {/* Step Progress */}
+        <div className="flex items-center gap-2 mb-6 animate-fade-up">
+          {steps.map((s, i) => (
+            <div key={s} className="flex items-center gap-2 flex-1">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all duration-300 ${
+                step > i + 1 ? 'bg-sky-500 text-white' : step === i + 1 ? 'bg-sky-500 text-white shadow-lg shadow-sky-200 scale-110' : 'bg-sky-100 text-sky-400'
+              }`}>{step > i + 1 ? '✓' : i + 1}</div>
+              <span className={`text-xs font-medium hidden sm:block ${step === i + 1 ? 'text-sky-600' : 'text-slate-400'}`}>{s}</span>
+              {i < steps.length - 1 && <div className={`h-0.5 flex-1 rounded-full transition-all duration-300 ${step > i + 1 ? 'bg-sky-400' : 'bg-sky-100'}`} />}
+            </div>
+          ))}
+        </div>
 
-          {/* ── STEP 1: Select Service ── */}
-          <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-5">
-            <h2 className="text-lg font-bold text-white mb-4">
-              <span className="bg-purple-600 text-white text-xs px-2 py-1 rounded-full mr-2">1</span>
-              Select a Service
-            </h2>
-            {services.length === 0 ? (
-              <p className="text-white/40 text-sm">No services available yet.</p>
+        <div className="space-y-5">
+          {/* Step 1: Service */}
+          <div className={`glass rounded-2xl p-5 transition-all duration-300 animate-fade-up ${step !== 1 && selectedService ? 'opacity-80' : ''}`}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                <span className="w-7 h-7 bg-sky-500 text-white rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                Select a Service
+              </h2>
+              {selectedService && step !== 1 && (
+                <button onClick={() => { setStep(1); setSelectedDate(''); setSelectedSlot('') }} className="text-xs text-sky-500 hover:text-sky-700 font-semibold">Change</button>
+              )}
+            </div>
+            {selectedService && step !== 1 ? (
+              <div className="bg-sky-50 rounded-xl px-4 py-3 flex justify-between items-center border border-sky-100">
+                <span className="text-slate-800 font-medium text-sm">{selectedService.title}</span>
+                <span className="text-sky-600 font-bold text-sm">${Number(selectedService.price).toFixed(2)} · {selectedService.duration_minutes}m</span>
+              </div>
+            ) : services.length === 0 ? (
+              <p className="text-slate-400 text-sm text-center py-4">No services available yet.</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {services.map((svc) => (
-                  <button
-                    key={svc.id}
-                    onClick={() => { setSelectedService(svc); setSelectedDate(''); setSelectedSlot('') }}
-                    className={`text-left p-4 rounded-xl border-2 transition-all duration-200 ${
+                {services.map(svc => (
+                  <button key={svc.id} onClick={() => { setSelectedService(svc); setStep(2) }}
+                    className={`text-left p-4 rounded-xl border-2 transition-all duration-200 hover:-translate-y-0.5 ${
                       selectedService?.id === svc.id
-                        ? 'bg-purple-600/30 border-purple-400 text-white'
-                        : 'bg-white/5 border-white/10 text-white/80 hover:border-white/30'
-                    }`}
-                  >
-                    <p className="font-semibold">{svc.title}</p>
-                    <p className="text-sm mt-1 opacity-70">
+                        ? 'bg-sky-500 border-sky-400 text-white shadow-lg shadow-sky-200'
+                        : 'bg-white border-slate-200 text-slate-700 hover:border-sky-300 hover:shadow-md'
+                    }`}>
+                    <p className="font-bold">{svc.title}</p>
+                    <p className={`text-sm mt-1 ${selectedService?.id === svc.id ? 'text-sky-100' : 'text-slate-400'}`}>
                       {svc.duration_minutes} mins · ${Number(svc.price).toFixed(2)}
                     </p>
-                    {svc.description && (
-                      <p className="text-xs mt-1 opacity-50">{svc.description}</p>
-                    )}
+                    {svc.description && <p className={`text-xs mt-1 ${selectedService?.id === svc.id ? 'text-sky-100' : 'text-slate-400'}`}>{svc.description}</p>}
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          {/* ── STEP 2: Select Date ── */}
-          {selectedService && (
-            <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-5">
-              <h2 className="text-lg font-bold text-white mb-4">
-                <span className="bg-purple-600 text-white text-xs px-2 py-1 rounded-full mr-2">2</span>
-                Select a Date
-              </h2>
-              <input
-                type="date"
-                min={getTodayString()}
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="bg-white/10 border border-white/30 text-white rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-400 w-full sm:w-auto"
-              />
-              {dateError && (
-                <p className="text-red-300 text-sm mt-3 bg-red-500/20 px-4 py-2 rounded-lg">
-                  ❌ {dateError}
-                </p>
-              )}
-              {selectedDate && !dateError && (
-                <p className="text-purple-300 text-sm mt-3">
-                  📅 {formatDate(selectedDate)}
-                </p>
+          {/* Step 2: Date */}
+          {step >= 2 && (
+            <div className="glass rounded-2xl p-5 animate-fade-up">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                  <span className="w-7 h-7 bg-sky-500 text-white rounded-full flex items-center justify-center text-xs font-bold">2</span>
+                  Select a Date
+                </h2>
+                {selectedDate && step !== 2 && (
+                  <button onClick={() => { setStep(2); setSelectedSlot('') }} className="text-xs text-sky-500 hover:text-sky-700 font-semibold">Change</button>
+                )}
+              </div>
+              {selectedDate && step !== 2 ? (
+                <div className="bg-sky-50 rounded-xl px-4 py-3 border border-sky-100">
+                  <span className="text-slate-800 font-medium text-sm">📅 {formatDate(selectedDate)}</span>
+                </div>
+              ) : (
+                <>
+                  <input type="date" min={today()} value={selectedDate}
+                    onChange={e => { setSelectedDate(e.target.value); if (e.target.value) setStep(3) }}
+                    className="sky-input w-full sm:w-auto" />
+                  {dateError && <p className="text-red-500 text-sm mt-3 bg-red-50 border border-red-200 px-4 py-2 rounded-xl">❌ {dateError}</p>}
+                  {selectedDate && !dateError && <p className="text-sky-500 text-sm mt-3 font-medium">📅 {formatDate(selectedDate)}</p>}
+                </>
               )}
             </div>
           )}
 
-         {/* ── STEP 3: Select Time Slot ── */}
-{selectedDate && !dateError && (
-  <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-5">
-    <div className="flex items-center justify-between mb-4">
-      <h2 className="text-lg font-bold text-white">
-        <span className="bg-purple-600 text-white text-xs px-2 py-1 rounded-full mr-2">3</span>
-        Select a Time Slot
-      </h2>
-      {/* ✅ Show service duration clearly */}
-      {selectedService && (
-        <span className="text-xs bg-purple-500/30 text-purple-300 px-3 py-1 rounded-full border border-purple-500/30">
-          ⏱ {selectedService.duration_minutes} min per slot
-        </span>
-      )}
-    </div>
+          {/* Step 3: Time */}
+          {step >= 3 && !dateError && (
+            <div className="glass rounded-2xl p-5 animate-fade-up">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                  <span className="w-7 h-7 bg-sky-500 text-white rounded-full flex items-center justify-center text-xs font-bold">3</span>
+                  Select a Time
+                </h2>
+                <span className="text-xs bg-sky-100 text-sky-600 px-3 py-1 rounded-full font-semibold border border-sky-200">
+                  ⏱ {selectedService?.duration_minutes} min slots
+                </span>
+              </div>
+              {slotsLoading ? (
+                <div className="flex items-center gap-3 py-4">
+                  <div className="w-5 h-5 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-slate-400 text-sm">Checking availability...</span>
+                </div>
+              ) : availableSlots.length === 0 ? (
+                <p className="text-slate-400 text-sm text-center py-4">No available slots. Try another date.</p>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                  {availableSlots.map(slot => {
+                    const endSlot = minsToTime(timeToMins(slot) + (selectedService?.duration_minutes || 30))
+                    const isSelected = selectedSlot === slot
+                    return (
+                      <button key={slot} onClick={() => { setSelectedSlot(slot); setStep(4) }}
+                        className={`flex flex-col items-center py-3 px-1 rounded-xl text-xs font-semibold border-2 transition-all duration-200 hover:-translate-y-0.5 ${
+                          isSelected
+                            ? 'bg-sky-500 border-sky-400 text-white shadow-lg shadow-sky-200 scale-105'
+                            : 'bg-white border-slate-200 text-slate-600 hover:border-sky-300 hover:shadow-md'
+                        }`}>
+                        <span className="font-bold text-sm">{formatTime(slot)}</span>
+                        <span className={`mt-0.5 text-xs ${isSelected ? 'text-sky-100' : 'text-slate-400'}`}>to {formatTime(endSlot)}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
-    {/* Provider working hours info */}
-    {selectedDate && (() => {
-      const dayOfWeek = new Date(selectedDate + 'T00:00:00').getDay()
-      const daySchedule = workingHours.find(wh => wh.day_of_week === dayOfWeek)
-      if (!daySchedule || daySchedule.is_day_off) return null
-      return (
-        <p className="text-white/40 text-xs mb-4">
-          🕐 Provider works {formatTime(daySchedule.start_time.slice(0,5))} – {formatTime(daySchedule.end_time.slice(0,5))} on this day
-        </p>
-      )
-    })()}
-
-    {slotsLoading ? (
-      <p className="text-white/50 animate-pulse text-sm">Checking availability...</p>
-    ) : availableSlots.length === 0 ? (
-      <div className="text-center py-6">
-        <p className="text-3xl mb-2">📅</p>
-        <p className="text-white/50 text-sm">
-          All slots are booked for this date.
-          <br />Please try another day.
-        </p>
-      </div>
-    ) : (
-      <>
-        <p className="text-white/40 text-xs mb-3">
-          {availableSlots.length} slot{availableSlots.length !== 1 ? 's' : ''} available
-        </p>
-        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-          {availableSlots.map((slot) => {
-            // Calculate end time for display
-            const [h, m] = slot.split(':').map(Number)
-            const endMins = h * 60 + m + (selectedService?.duration_minutes || 30)
-            const endSlot = `${String(Math.floor(endMins / 60)).padStart(2,'0')}:${String(endMins % 60).padStart(2,'0')}`
-
-            return (
-              <button
-                key={slot}
-                onClick={() => setSelectedSlot(slot)}
-                className={`flex flex-col items-center py-3 px-2 rounded-xl text-xs font-medium border-2 transition-all duration-200 ${
-                  selectedSlot === slot
-                    ? 'bg-purple-600 border-purple-400 text-white shadow-lg shadow-purple-500/30'
-                    : 'bg-white/5 border-white/10 text-white/70 hover:border-purple-400 hover:text-white'
-                }`}
-              >
-                <span className="font-bold text-sm">{formatTime(slot)}</span>
-                <span className="opacity-60 mt-0.5">to {formatTime(endSlot)}</span>
-              </button>
-            )
-          })}
-        </div>
-      </>
-    )}
-  </div>
-)}
-
-
-          {/* ── STEP 4: Notes + Confirm ── */}
-          {selectedSlot && (
-            <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-5">
-              <h2 className="text-lg font-bold text-white mb-4">
-                <span className="bg-purple-600 text-white text-xs px-2 py-1 rounded-full mr-2">4</span>
+          {/* Step 4: Confirm */}
+          {step >= 4 && selectedSlot && (
+            <div className="glass rounded-2xl p-5 animate-fade-up border-t-4 border-sky-400">
+              <h2 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <span className="w-7 h-7 bg-sky-500 text-white rounded-full flex items-center justify-center text-xs font-bold">4</span>
                 Confirm Booking
               </h2>
-
-              {/* Summary */}
-              <div className="bg-white/5 rounded-xl p-4 mb-4 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-white/50 text-sm">Service</span>
-                  <span className="text-white text-sm font-medium">{selectedService?.title}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/50 text-sm">Date</span>
-                  <span className="text-white text-sm font-medium">{formatDate(selectedDate)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/50 text-sm">Time</span>
-                  <span className="text-purple-300 text-sm font-medium">{formatTime(selectedSlot)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/50 text-sm">Duration</span>
-                  <span className="text-white text-sm font-medium">{selectedService?.duration_minutes} mins</span>
-                </div>
-                <div className="flex justify-between border-t border-white/10 pt-2 mt-2">
-                  <span className="text-white/50 text-sm">Price</span>
-                  <span className="text-white font-bold">${Number(selectedService?.price).toFixed(2)}</span>
+              <div className="bg-gradient-to-br from-sky-50 to-blue-50 rounded-xl p-4 mb-4 border border-sky-100 space-y-3">
+                {[
+                  ['Service', selectedService?.title || ''],
+                  ['Provider', provider.business_name || provider.full_name],
+                  ['Date', formatDate(selectedDate)],
+                  ['Time', formatTime(selectedSlot)],
+                  ['Duration', `${selectedService?.duration_minutes} mins`],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex justify-between">
+                    <span className="text-slate-400 text-sm">{k}</span>
+                    <span className="text-slate-800 text-sm font-semibold">{v}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t border-sky-200 pt-3 mt-1">
+                  <span className="text-slate-500 font-semibold text-sm">Total Price</span>
+                  <span className="text-sky-600 font-black text-lg">${Number(selectedService?.price).toFixed(2)}</span>
                 </div>
               </div>
-
-              {/* Notes */}
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any notes for the provider? (optional)"
-                rows={2}
-                className="w-full bg-white/10 border border-white/20 text-white placeholder-white/30 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none mb-4 text-sm"
-              />
-
-              {error && (
-                <p className="text-red-300 text-sm mb-4 bg-red-500/20 px-4 py-2 rounded-lg">❌ {error}</p>
-              )}
-
-              {/* Book Button */}
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+                placeholder="Notes for the provider? (optional)" className="sky-input resize-none mb-4 text-sm" />
+              {error && <p className="text-red-500 text-sm mb-4 bg-red-50 border border-red-200 px-4 py-2 rounded-xl">❌ {error}</p>}
               {currentUser ? (
-                <button
-                  onClick={handleBook}
-                  disabled={booking}
-                  className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30"
-                >
-                  {booking ? 'Confirming...' : '✅ Confirm Booking'}
+                <button onClick={handleBook} disabled={booking} className="w-full btn-shimmer py-4 disabled:opacity-60 disabled:cursor-not-allowed">
+                  {booking ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Sending request...
+                    </span>
+                  ) : '📅 Send Booking Request'}
                 </button>
               ) : (
                 <div className="text-center">
-                  <p className="text-white/60 text-sm mb-3">You need to be logged in to book</p>
-                  <Link
-                    href={`/auth/login`}
-                    className="inline-block w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3.5 rounded-xl transition text-center"
-                  >
-                    Sign In to Book
-                  </Link>
+                  <p className="text-slate-400 text-sm mb-3">Sign in to confirm your booking</p>
+                  <Link href="/auth/login" className="w-full btn-shimmer inline-block py-4 text-center">Sign In to Book</Link>
                 </div>
               )}
             </div>
           )}
-
         </div>
       </div>
     </div>
