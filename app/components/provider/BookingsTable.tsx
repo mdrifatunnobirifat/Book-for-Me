@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { buildGoogleCalendarUrl } from '@/lib/calendar'
 
 interface Booking {
   id: string
@@ -24,12 +25,15 @@ type StatusFilter = 'all' | 'pending' | 'confirmed' | 'cancelled' | 'completed'
 
 function formatDate(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
   })
 }
 
 function formatTime(time: string) {
-  const [h, m] = time.split(':').map(Number)
+  const [h, m] = time.slice(0, 5).split(':').map(Number)
   const ampm = h >= 12 ? 'PM' : 'AM'
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`
 }
@@ -39,18 +43,11 @@ function isPast(dateStr: string, timeStr: string) {
   return bookingDateTime < new Date()
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  confirmed: 'bg-green-500/20 text-green-300 border-green-500/40',
-  pending:   'bg-yellow-500/20 text-yellow-300 border-yellow-500/40',
-  cancelled: 'bg-red-500/20 text-red-300 border-red-500/40',
-  completed: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  confirmed: '✅ Confirmed',
-  pending:   '⏳ Waiting',
-  cancelled: '❌ Rejected',
-  completed: '🏁 Completed',
+const STATUS_STYLES: Record<string, { badge: string; label: string }> = {
+  confirmed: { badge: 'bg-emerald-100 text-emerald-700 border-emerald-300', label: '✅ Confirmed' },
+  pending:   { badge: 'bg-amber-100 text-amber-700 border-amber-300 animate-pulse', label: '⏳ Waiting' },
+  cancelled: { badge: 'bg-rose-100 text-rose-700 border-rose-300', label: '❌ Cancelled' },
+  completed: { badge: 'bg-sky-100 text-sky-700 border-sky-300', label: '🏁 Completed' },
 }
 
 export default function BookingsTable({ bookings, providerName, onRefresh }: Props) {
@@ -59,61 +56,63 @@ export default function BookingsTable({ bookings, providerName, onRefresh }: Pro
   const [newDate, setNewDate] = useState('')
   const [newTime, setNewTime] = useState('')
   const [updating, setUpdating] = useState<string | null>(null)
-  const [emailSending, setEmailSending] = useState<string | null>(null)
+  const [notifyMsg, setNotifyMsg] = useState('')
   const supabase = createClient()
 
-  // Compute effective status (past confirmed → completed)
   const getEffectiveStatus = (b: Booking) => {
     if (b.status === 'confirmed' && isPast(b.booking_date, b.end_time)) return 'completed'
     return b.status
   }
 
-  // Filter bookings
   const filtered = bookings.filter((b) => {
     const eff = getEffectiveStatus(b)
     return filter === 'all' || eff === filter
   })
 
-  // Count by status
-  const counts = {
-    all:       bookings.length,
-    pending:   bookings.filter(b => b.status === 'pending').length,
-    confirmed: bookings.filter(b => b.status === 'confirmed' && !isPast(b.booking_date, b.end_time)).length,
-    completed: bookings.filter(b => b.status === 'confirmed' && isPast(b.booking_date, b.end_time)).length,
-    cancelled: bookings.filter(b => b.status === 'cancelled').length,
-  }
-
-  // Send email notification
-  const sendNotification = async (booking: Booking, status: string, rescheduleData?: { date: string; time: string }) => {
+  const sendNotification = async (
+    booking: Booking,
+    newStatus: string,
+    rescheduleData?: { date: string; time: string }
+  ) => {
     try {
-      setEmailSending(booking.id)
-      await fetch('/api/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerEmail: booking.customer?.email || '',
-          customerName: booking.customer?.full_name || 'Customer',
-          providerName,
-          serviceName: booking.services?.title,
-          bookingDate: formatDate(booking.booking_date),
-          bookingTime: formatTime(booking.start_time),
-          status,
-          newDate: rescheduleData ? formatDate(rescheduleData.date) : '',
-          newTime: rescheduleData ? formatTime(rescheduleData.time) : '',
-        }),
-      })
+      // Find customer email if not attached
+      let recipientEmail = booking.customer?.email
+      if (!recipientEmail) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('email')
+          .eq('id', booking.customer?.id)
+          .single()
+        recipientEmail = prof?.email
+      }
+
+      if (recipientEmail) {
+        await fetch('/api/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerEmail: recipientEmail,
+            customerName: booking.customer?.full_name || 'Customer',
+            providerName,
+            serviceName: booking.services?.title,
+            bookingDate: formatDate(booking.booking_date),
+            bookingTime: formatTime(booking.start_time),
+            status: newStatus,
+            newDate: rescheduleData ? formatDate(rescheduleData.date) : undefined,
+            newTime: rescheduleData ? formatTime(rescheduleData.time) : undefined,
+            notes: booking.customer_notes,
+          }),
+        })
+        setNotifyMsg(`📧 Notification sent to ${recipientEmail}`)
+        setTimeout(() => setNotifyMsg(''), 4000)
+      }
     } catch (e) {
-      console.error('Email failed:', e)
-    } finally {
-      setEmailSending(null)
+      console.warn('Notification non-critical failure:', e)
     }
   }
 
-  // Update status
   const handleStatusChange = async (booking: Booking, newStatus: string) => {
-    if (booking.status === 'cancelled') return // Cannot undo rejection
     setUpdating(booking.id)
-
     const { error } = await supabase
       .from('bookings')
       .update({ status: newStatus })
@@ -126,22 +125,23 @@ export default function BookingsTable({ bookings, providerName, onRefresh }: Pro
     setUpdating(null)
   }
 
-  // Reschedule booking
   const handleReschedule = async (booking: Booking) => {
     if (!newDate || !newTime) return
     setUpdating(booking.id)
 
-    // Calculate new end time
+    const dur = booking.services?.duration_minutes || 30
     const [h, m] = newTime.split(':').map(Number)
-    const endMins = h * 60 + m + booking.services.duration_minutes
-    const newEndTime = `${String(Math.floor(endMins / 60)).padStart(2, '0')}:${String(endMins % 60).padStart(2, '0')}`
+    const endMinutes = h * 60 + m + dur
+    const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(
+      endMinutes % 60
+    ).padStart(2, '0')}:00`
 
     const { error } = await supabase
       .from('bookings')
       .update({
         booking_date: newDate,
-        start_time: newTime,
-        end_time: newEndTime,
+        start_time: newTime + ':00',
+        end_time: endTime,
         status: 'confirmed',
       })
       .eq('id', booking.id)
@@ -149,236 +149,211 @@ export default function BookingsTable({ bookings, providerName, onRefresh }: Pro
     if (!error) {
       await sendNotification(booking, 'rescheduled', { date: newDate, time: newTime })
       setRescheduleId(null)
-      setNewDate('')
-      setNewTime('')
       onRefresh()
     }
     setUpdating(null)
   }
 
   return (
-    <div className="bg-blue-500 backdrop-blur-md border border-white/20 rounded-2xl p-5">
+    <div className="glass rounded-2xl p-6 shadow-xl border border-sky-100">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+            <span>📋</span> Appointment Bookings
+          </h2>
+          <p className="text-slate-400 text-xs mt-0.5">Manage customer orders and status updates</p>
+        </div>
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-xl font-bold text-white">📋 Booking Requests</h2>
-        <span className="text-black text-sm border-2 border-emerald-300 p-2 rounded-4xl">{bookings.length} total</span>
+        {/* Filters */}
+        <div className="flex gap-1.5 flex-wrap">
+          {(['all', 'pending', 'confirmed', 'completed', 'cancelled'] as StatusFilter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`text-xs px-3.5 py-1.5 rounded-xl font-bold capitalize transition-all ${
+                filter === f
+                  ? 'bg-sky-500 text-white shadow-md shadow-sky-200'
+                  : 'bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-100'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Status Filter Tabs */}
-      <div className="flex flex-wrap gap-2 mb-5">
-        {(['all', 'pending', 'confirmed', 'completed', 'cancelled'] as StatusFilter[]).map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(s)}
-            className={`text-xs px-3 py-1.5 rounded-full border transition-all font-bold ${
-              filter === s
-                ? 'bg-cyan-800 border-cyan-900 text-white'
-                : 'bg-blue-200 border-white/200 text-black hover: hover:bg-blue-400'
-            }`}
-          >
-            {s === 'all' ? '📋 All' :
-             s === 'pending' ? '⏳ Waiting' :
-             s === 'confirmed' ? '✅ Confirmed' :
-             s === 'completed' ? '🏁 Completed' : '❌ Rejected'}
-            <span className="ml-1.5 bg-white/10 px-1.5 py-0.5 rounded-full">
-              {counts[s]}
-            </span>
-          </button>
-        ))}
-      </div>
+      {notifyMsg && (
+        <div className="bg-sky-50 border border-sky-200 text-sky-700 text-xs px-4 py-2.5 rounded-xl mb-4 font-semibold animate-fade-in flex items-center gap-2">
+          <span>📬</span> {notifyMsg}
+        </div>
+      )}
 
-      {/* Bookings List */}
       {filtered.length === 0 ? (
-        <div className="text-center py-10">
-          <p className="text-3xl mb-2">📭</p>
-          <p className="text-white/50 text-sm">No bookings in this category</p>
+        <div className="text-center py-14 bg-sky-50/50 rounded-xl border border-dashed border-sky-200">
+          <p className="text-4xl mb-2">📭</p>
+          <p className="text-slate-500 text-sm font-semibold">No bookings found in this category.</p>
         </div>
       ) : (
         <div className="space-y-4">
-          {filtered.map((booking) => {
-            const effectiveStatus = getEffectiveStatus(booking)
-            const isRejected = booking.status === 'cancelled'
-            const isPastBooking = effectiveStatus === 'completed'
-            const isUpdating = updating === booking.id
+          {filtered.map((b) => {
+            const eff = getEffectiveStatus(b)
+            const style = STATUS_STYLES[eff] || STATUS_STYLES.pending
+            const isUpdating = updating === b.id
+
+            const calUrl = buildGoogleCalendarUrl({
+              title: `${b.services?.title} with ${b.customer?.full_name || 'Customer'}`,
+              date: b.booking_date,
+              startTime: b.start_time.slice(0, 5),
+              endTime: b.end_time.slice(0, 5),
+              description: `BookIt Booking\nCustomer: ${b.customer?.full_name || 'Customer'}\nNotes: ${b.customer_notes || 'None'}`,
+            })
 
             return (
               <div
-                key={booking.id}
-                className={`rounded-xl border p-4 transition-all ${
-                  isPastBooking
-                    ? 'bg-white/3 border-white/5 opacity-70'
-                    : 'bg-white/5 border-white/10'
-                }`}
+                key={b.id}
+                className="bg-white rounded-2xl p-5 border border-slate-100 hover:border-sky-200 hover:shadow-lg transition-all duration-200"
               >
-                {/* Top Row — Customer + Status */}
-                <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      {/* Customer Avatar */}
-                      <div className="w-8 h-8 rounded-full bg-purple-700 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                        {booking.customer?.full_name?.charAt(0).toUpperCase()}
-                      </div>
-                      <span className="text-white font-semibold">
-                        {booking.customer?.full_name}
-                      </span>
-                      {emailSending === booking.id && (
-                        <span className="text-xs text-purple-300 animate-pulse">📧 sending...</span>
-                      )}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 text-white font-bold flex items-center justify-center text-base shadow-sm">
+                      {b.customer?.full_name ? b.customer.full_name.charAt(0).toUpperCase() : '👤'}
                     </div>
-                    <p className="text-purple-300 text-sm ml-10">{booking.services?.title}</p>
-                    {booking.customer_notes && (
-                      <p className="text-white/40 text-xs ml-10 mt-1 italic">
-                        &ldquo;{booking.customer_notes}&rdquo;
-                      </p>
-                    )}
+                    <div>
+                      <h4 className="font-extrabold text-slate-800 text-base">
+                        {b.customer?.full_name || 'Customer'}
+                      </h4>
+                      <p className="text-sky-600 font-bold text-xs">{b.services?.title}</p>
+                    </div>
                   </div>
 
-                  {/* Status Badge */}
-                  <span className={`text-xs px-3 py-1 rounded-full border font-medium ${STATUS_STYLES[effectiveStatus] || ''}`}>
-                    {STATUS_LABELS[effectiveStatus]}
+                  <span
+                    className={`text-xs px-3 py-1 rounded-full border font-bold ${style.badge}`}
+                  >
+                    {style.label}
                   </span>
                 </div>
 
-                {/* Date + Time + Price */}
-                <div className="flex flex-wrap gap-4 text-sm mb-4 ml-10">
+                {b.customer_notes && (
+                  <p className="text-slate-500 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100 mb-3 italic">
+                    &ldquo;{b.customer_notes}&rdquo;
+                  </p>
+                )}
+
+                {/* Info Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-sky-50/40 p-3 rounded-xl border border-sky-100 mb-4">
                   <div>
-                    <span className="text-white/40 text-xs block">Date</span>
-                    <span className="text-white">{formatDate(booking.booking_date)}</span>
+                    <span className="text-slate-400 block font-medium">Date</span>
+                    <span className="text-slate-800 font-bold">{formatDate(b.booking_date)}</span>
                   </div>
                   <div>
-                    <span className="text-white/40 text-xs block">Time</span>
-                    <span className="text-purple-300 font-medium">
-                      {formatTime(booking.start_time)} – {formatTime(booking.end_time)}
+                    <span className="text-slate-400 block font-medium">Time</span>
+                    <span className="text-sky-600 font-bold">
+                      {formatTime(b.start_time)} – {formatTime(b.end_time)}
                     </span>
                   </div>
                   <div>
-                    <span className="text-white/40 text-xs block">Duration</span>
-                    <span className="text-white">{booking.services?.duration_minutes} min</span>
+                    <span className="text-slate-400 block font-medium">Duration</span>
+                    <span className="text-slate-700 font-bold">{b.services?.duration_minutes} min</span>
                   </div>
                   <div>
-                    <span className="text-white/40 text-xs block">Price</span>
-                    <span className="text-green-300 font-medium">
-                      ${Number(booking.services?.price).toFixed(2)}
+                    <span className="text-slate-400 block font-medium">Price</span>
+                    <span className="text-emerald-600 font-extrabold">
+                      ${Number(b.services?.price).toFixed(2)}
                     </span>
                   </div>
                 </div>
 
-                {/* Action Buttons — only for non-past, non-rejected bookings */}
-                {!isPastBooking && !isRejected && (
-                  <div className="ml-10 space-y-3">
+                {/* Actions */}
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+                  {b.status !== 'confirmed' && (
+                    <button
+                      onClick={() => handleStatusChange(b, 'confirmed')}
+                      disabled={isUpdating}
+                      className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold px-3.5 py-1.5 rounded-lg transition"
+                    >
+                      {isUpdating ? '...' : '✅ Accept & Confirm'}
+                    </button>
+                  )}
 
-                    {/* Status Buttons */}
-                    <div className="flex flex-wrap gap-2">
+                  {b.status !== 'cancelled' && (
+                    <button
+                      onClick={() => {
+                        if (confirm('Cancel / reject this booking?')) {
+                          handleStatusChange(b, 'cancelled')
+                        }
+                      }}
+                      disabled={isUpdating}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold px-3.5 py-1.5 rounded-lg transition"
+                    >
+                      {isUpdating ? '...' : '❌ Reject'}
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      setRescheduleId(rescheduleId === b.id ? null : b.id)
+                      setNewDate(b.booking_date)
+                      setNewTime(b.start_time.slice(0, 5))
+                    }}
+                    className="bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold px-3.5 py-1.5 rounded-lg transition"
+                  >
+                    🗓️ Reschedule
+                  </button>
+
+                  <a
+                    href={calUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold px-3.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ml-auto"
+                  >
+                    <span>📅</span> Add to Google Calendar
+                  </a>
+                </div>
+
+                {/* Reschedule Drawer */}
+                {rescheduleId === b.id && (
+                  <div className="mt-3 bg-sky-50 p-4 rounded-xl border border-sky-200 space-y-3 animate-fade-in">
+                    <p className="text-sky-800 text-xs font-bold">
+                      📬 Reschedule & Automatically Notify Customer by Email
+                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      <div>
+                        <label className="text-slate-600 text-xs block mb-1 font-semibold">New Date</label>
+                        <input
+                          type="date"
+                          value={newDate}
+                          min={new Date().toISOString().split('T')[0]}
+                          onChange={(e) => setNewDate(e.target.value)}
+                          className="sky-input text-xs py-1.5"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-slate-600 text-xs block mb-1 font-semibold">New Time</label>
+                        <input
+                          type="time"
+                          value={newTime}
+                          onChange={(e) => setNewTime(e.target.value)}
+                          className="sky-input text-xs py-1.5"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
                       <button
-                        onClick={() => handleStatusChange(booking, 'confirmed')}
-                        disabled={isUpdating || booking.status === 'confirmed'}
-                        className={`text-xs px-4 py-1.5 rounded-lg border transition font-medium ${
-                          booking.status === 'confirmed'
-                            ? 'bg-green-500/30 border-green-500/50 text-green-300 cursor-default'
-                            : 'bg-white/5 border-green-500/30 text-green-300 hover:bg-green-500/20'
-                        }`}
+                        onClick={() => handleReschedule(b)}
+                        disabled={!newDate || !newTime || isUpdating}
+                        className="btn-shimmer text-xs px-4 py-2 rounded-lg font-bold"
                       >
-                        {isUpdating ? '...' : '✅ Confirm'}
+                        {isUpdating ? 'Saving...' : 'Confirm New Schedule'}
                       </button>
-
                       <button
-                        onClick={() => handleStatusChange(booking, 'pending')}
-                        disabled={isUpdating || booking.status === 'pending'}
-                        className={`text-xs px-4 py-1.5 rounded-lg border transition font-medium ${
-                          booking.status === 'pending'
-                            ? 'bg-yellow-500/30 border-yellow-500/50 text-yellow-300 cursor-default'
-                            : 'bg-white/5 border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20'
-                        }`}
+                        onClick={() => setRescheduleId(null)}
+                        className="bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 text-xs px-3 py-2 rounded-lg transition"
                       >
-                        {isUpdating ? '...' : '⏳ Waitlist'}
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          if (window.confirm('Reject this booking? This cannot be undone.')) {
-                            handleStatusChange(booking, 'cancelled')
-                          }
-                        }}
-                        disabled={isUpdating}
-                        className="text-xs px-4 py-1.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-500/20 transition font-medium"
-                      >
-                        {isUpdating ? '...' : '❌ Reject'}
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setRescheduleId(rescheduleId === booking.id ? null : booking.id)
-                          setNewDate(booking.booking_date)
-                          setNewTime(booking.start_time.slice(0, 5))
-                        }}
-                        className="text-xs px-4 py-1.5 rounded-lg border border-purple-500/30 text-purple-300 hover:bg-purple-500/20 transition font-medium"
-                      >
-                        🗓️ Reschedule
+                        Cancel
                       </button>
                     </div>
-
-                    {/* Reschedule Panel */}
-                    {rescheduleId === booking.id && (
-                      <div className="bg-white/5 border border-purple-500/30 rounded-xl p-4 space-y-3">
-                        <p className="text-purple-300 text-xs font-semibold">
-                          📬 Customer will be notified by email
-                        </p>
-                        <div className="flex flex-wrap gap-3">
-                          <div>
-                            <label className="text-white/50 text-xs block mb-1">New Date</label>
-                            <input
-                              type="date"
-                              value={newDate}
-                              min={new Date().toISOString().split('T')[0]}
-                              onChange={(e) => setNewDate(e.target.value)}
-                              className="bg-white/10 border border-white/20 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-white/50 text-xs block mb-1">New Time</label>
-                            <input
-                              type="time"
-                              value={newTime}
-                              onChange={(e) => setNewTime(e.target.value)}
-                              className="bg-white/10 border border-white/20 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => handleReschedule(booking)}
-                            disabled={!newDate || !newTime || isUpdating}
-                            className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs px-5 py-2 rounded-lg transition font-semibold"
-                          >
-                            {isUpdating ? 'Saving...' : 'Save & Notify Customer'}
-                          </button>
-                          <button
-                            onClick={() => setRescheduleId(null)}
-                            className="bg-white/10 hover:bg-white/20 text-white text-xs px-4 py-2 rounded-lg transition"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
-
-                {/* Rejected — show permanent message */}
-                {isRejected && (
-                  <p className="ml-10 text-red-300/50 text-xs italic">
-                    This booking was rejected and cannot be changed.
-                  </p>
-                )}
-
-                {/* Completed — show past label */}
-                {isPastBooking && (
-                  <p className="ml-10 text-blue-300/50 text-xs italic">
-                    This appointment has already taken place.
-                  </p>
-                )}
-
               </div>
             )
           })}
