@@ -43,7 +43,7 @@ export async function sendBookingEmail({
       <!-- Header -->
       <div style="background:linear-gradient(135deg,#0ea5e9,#2563eb);padding:32px 28px;text-align:center;">
         <div style="font-size:40px;margin-bottom:8px;">📅</div>
-        <div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:-1px;">BookIt</div>
+        <div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:-1px;">BookforMe</div>
         <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-top:4px;">Appointment Management</div>
       </div>
       <!-- Status Banner -->
@@ -79,7 +79,7 @@ export async function sendBookingEmail({
           </a>
         </div>
         <p style="color:#94a3b8;font-size:12px;text-align:center;margin:20px 0 0;">
-          You received this because you use BookIt · <a href="#" style="color:#0ea5e9;">Unsubscribe</a>
+          You received this because you use BookforMe · <a href="#" style="color:#0ea5e9;">Unsubscribe</a>
         </p>
       </div>
     </div>

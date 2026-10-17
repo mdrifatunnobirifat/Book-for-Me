@@ -75,7 +75,7 @@ function SignupForm() {
     <div className="glass rounded-3xl p-8 shadow-2xl border border-sky-100 animate-fade-up">
       <h2 className="text-2xl font-black text-slate-800 mb-1">Create Account</h2>
       <p className="text-slate-400 text-xs mb-5">
-        Join BookIt to schedule services or start your online appointment store.
+        Join BookforMe to schedule services or start your online appointment store.
       </p>
 
       {error && (
@@ -221,7 +221,7 @@ export default function SignupPage() {
         <div className="text-center mb-6 animate-fade-up">
           <Link href="/" className="inline-flex items-center gap-2 hover:opacity-85 transition">
             <span className="text-4xl">📅</span>
-            <span className="text-3xl font-black text-sky-700 tracking-tight">BookIt</span>
+            <span className="text-3xl font-black text-sky-700 tracking-tight">BookforMe</span>
           </Link>
           <p className="text-slate-500 mt-1 text-xs">Modern Appointment & Shopping Marketplace</p>
         </div>

@@ -32,7 +32,7 @@ export default function Home() {
         <nav className="w-full flex items-center justify-between mb-20 animate-fade-in">
           <div className="flex items-center gap-2">
             <span className="text-3xl">📅</span>
-            <span className="text-2xl font-bold text-sky-700">BookIt</span>
+            <span className="text-2xl font-bold text-sky-700">BookforMe</span>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/explore" className="text-sky-600 hover:text-sky-800 font-medium transition text-sm px-4 py-2 rounded-xl hover:bg-sky-100">
@@ -141,7 +141,7 @@ export default function Home() {
 
         {/* Footer */}
         <p className="text-slate-400 text-sm mt-16 animate-fade-in">
-          © 2025 BookIt · Made with 💙
+          © 2025 BookforMe · Made with 💙
         </p>
       </div>
     </div>

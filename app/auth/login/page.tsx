@@ -52,7 +52,7 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 hover:opacity-80 transition">
             <span className="text-4xl">📅</span>
-            <span className="text-3xl font-black text-sky-700">BookIt</span>
+            <span className="text-3xl font-black text-sky-700">BookforMe</span>
           </Link>
           <p className="text-slate-500 mt-2 text-sm">Welcome back! Sign in to continue.</p>
         </div>

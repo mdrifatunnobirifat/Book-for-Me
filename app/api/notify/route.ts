@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
     const calUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
       serviceName + ' with ' + providerName
     )}&dates=${calDatePart}T${calTimePart}00/${calDatePart}T${calTimePart}00&details=${encodeURIComponent(
-      'Booked via BookIt platform.\nProvider: ' + providerName
+      'Booked via BookforMe platform.\nProvider: ' + providerName
     )}`
 
     const emailHtml =
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
     <!-- Header -->
     <div style="background:linear-gradient(135deg,#0284c7,#2563eb);padding:36px 32px;text-align:center;">
       <div style="font-size:42px;line-height:1;margin-bottom:8px;">📅</div>
-      <div style="font-size:28px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;">BookIt</div>
+      <div style="font-size:28px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;">BookforMe</div>
       <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;">Smart Appointment & Shopping Platform</div>
     </div>
 
@@ -181,7 +181,7 @@ export async function POST(req: NextRequest) {
       </div>
 
       <p style="color:#94a3b8;font-size:12px;text-align:center;margin:24px 0 0;line-height:1.5;">
-        You received this notification from BookIt Platform.<br>
+        You received this notification from BookforMe Platform.<br>
         Questions? Reply to this email or contact ${providerName}.
       </p>
     </div>
@@ -207,7 +207,7 @@ export async function POST(req: NextRequest) {
 
         await transporter.verify()
         const info = await transporter.sendMail({
-          from: `"BookIt 📅" <${user}>`,
+          from: `"BookforMe 📅" <${user}>`,
           to: recipient,
           subject: emailSubject,
           html: emailHtml,

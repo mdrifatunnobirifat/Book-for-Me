@@ -27,7 +27,7 @@ export function buildGoogleCalendarUrl({
     action: "TEMPLATE",
     text: title,
     dates: `${start}/${end}`,
-    details: description || "Booked via BookIt",
+    details: description || "Booked via BookforMe",
     ...(location ? { location } : {}),
   })
 
@@ -61,16 +61,16 @@ export function buildICSContent({
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//BookIt//Appointments//EN",
+    "PRODID:-//BookforMe//Appointments//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:REQUEST",
     "BEGIN:VEVENT",
-    `UID:${uid}@bookit.app`,
+    `UID:${uid}@bookforme.app`,
     `DTSTART:${fmt(date, startTime)}`,
     `DTEND:${fmt(date, endTime)}`,
     `SUMMARY:${title}`,
     `DESCRIPTION:${(description || "").replace(/\n/g, "\\n")}`,
-    organizer ? `ORGANIZER;CN=${organizer}:mailto:noreply@bookit.app` : "",
+    organizer ? `ORGANIZER;CN=${organizer}:mailto:noreply@bookforme.app` : "",
     "STATUS:CONFIRMED",
     "SEQUENCE:0",
     "END:VEVENT",

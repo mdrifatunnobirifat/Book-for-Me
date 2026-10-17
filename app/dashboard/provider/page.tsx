@@ -173,7 +173,7 @@ export default function ProviderDashboard() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <span className="text-3xl">📅</span>
-            <span className="text-2xl font-black text-sky-700 tracking-tight">BookIt</span>
+            <span className="text-2xl font-black text-sky-700 tracking-tight">BookforMe</span>
             <span className="text-xs bg-sky-100 text-sky-700 px-2.5 py-0.5 rounded-full font-bold ml-2">
               Provider Center
             </span>
