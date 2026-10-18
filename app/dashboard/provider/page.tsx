@@ -19,6 +19,7 @@ interface Profile {
   location: string | null
   avatar_url: string | null
   category: string | null
+  role?: string | null
 }
 
 interface Service {
@@ -93,7 +94,7 @@ export default function ProviderDashboard() {
         return
       }
       const { data: prof } = await supabase.from('profiles').select('role').eq('id', u.id).single()
-      if (prof?.role !== 'provider') {
+      if (prof?.role !== 'provider' && prof?.role !== 'admin') {
         router.push('/dashboard/customer')
         return
       }
@@ -191,6 +192,12 @@ export default function ProviderDashboard() {
               </a>
             )}
 
+            <Link
+              href="/admin"
+              className="text-slate-600 hover:text-sky-600 text-xs font-bold transition px-3 py-2 rounded-xl hover:bg-sky-50 flex items-center gap-1 border border-sky-100"
+            >
+              🛡️ Super Admin
+            </Link>
             <button
               onClick={async () => {
                 await supabase.auth.signOut()

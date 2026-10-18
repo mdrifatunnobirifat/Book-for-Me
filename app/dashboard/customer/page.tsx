@@ -64,7 +64,7 @@ export default function CustomerDashboard() {
         router.push('/auth/login')
         return
       }
-      const { data: p } = await supabase.from('profiles').select('full_name').eq('id', u.id).single()
+      const { data: p } = await supabase.from('profiles').select('full_name, role').eq('id', u.id).single()
       setUser({ id: u.id, full_name: p?.full_name || 'Customer', email: u.email || '' })
       await fetchBookings(u.id)
       setLoading(false)
@@ -124,6 +124,14 @@ export default function CustomerDashboard() {
             <Link href="/explore" className="btn-shimmer text-xs px-4 py-2.5 rounded-xl font-bold">
               🛍️ Explore & Book Shops
             </Link>
+            {user?.email === 'rifatsingertvr@gmail.com' && (
+              <Link
+                href="/admin"
+                className="bg-slate-900 text-sky-400 hover:bg-slate-800 text-xs font-bold transition px-3 py-2 rounded-lg flex items-center gap-1 shadow-sm border border-slate-700"
+              >
+                🛡️ Super Admin
+              </Link>
+            )}
             <button
               onClick={async () => {
                 await supabase.auth.signOut()

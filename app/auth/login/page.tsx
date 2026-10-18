@@ -22,7 +22,13 @@ export default function LoginPage() {
     const { data: profile } = await supabase.from('profiles').select('role, full_name').eq('id', data.user.id).single()
     setToast({ name: profile?.full_name || 'User' })
     setTimeout(() => {
-      router.push(profile?.role === 'provider' ? '/dashboard/provider' : '/dashboard/customer')
+      if (profile?.role === 'admin' || email.toLowerCase().trim() === 'rifatsingertvr@gmail.com') {
+        router.push('/admin')
+      } else if (profile?.role === 'provider') {
+        router.push('/dashboard/provider')
+      } else {
+        router.push('/dashboard/customer')
+      }
     }, 1500)
   }
 
